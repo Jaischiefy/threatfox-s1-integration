@@ -49,13 +49,22 @@ jobs:
       - name: Import ThreatFox IOCs
         run: python main.py import-iocs --confirm-write
 
+      - name: Sanitize logs
+        if: always()
+        run: |
+          # Remove sensitive patterns from logs before upload
+          if [ -d logs ]; then
+            find logs/ -name "*.log" -exec sed -i 's/"error":[^,}]*/"error":"[redacted]"/g' {} \;
+            find logs/ -name "*.json" -exec sed -i 's/"value":"[^"]*"/"value":"[redacted]"/g' {} \;
+          fi
+
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v3
         with:
           name: import-logs
           path: logs/
-          retention-days: 7
+          retention-days: 1
 
       - name: Check status
         run: python main.py status

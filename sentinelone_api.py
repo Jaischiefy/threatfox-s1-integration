@@ -2,6 +2,7 @@
 
 import asyncio
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -23,6 +24,13 @@ class SentinelOneClient:
         timeout: float = 30.0,
     ):
         """Initialize SentinelOne client."""
+        # Validate HTTPS scheme
+        parsed = urlparse(console_url)
+        if parsed.scheme != "https":
+            raise ValueError(
+                f"S1_CONSOLE_URL must use HTTPS, got: {parsed.scheme}://"
+            )
+
         self.console_url = console_url.rstrip("/")
         self.api_token = api_token
         self.account_id = account_id

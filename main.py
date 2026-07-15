@@ -96,9 +96,9 @@ def inspect(ctx):
 
     # Configuration
     click.echo("\n📋 Configuration:")
-    click.echo(f"  ThreatFox API Key:     {config.threatfox_auth_key[:20]}..." if config.threatfox_auth_key else "  ThreatFox API Key:     NOT SET")
+    click.echo(f"  ThreatFox API Key:     {'✅ SET' if config.threatfox_auth_key else '❌ NOT SET'}")
     click.echo(f"  S1 Console URL:        {config.s1_console_url}")
-    click.echo(f"  S1 API Token:          {config.s1_api_token[:20]}..." if config.s1_api_token else "  S1 API Token:          NOT SET")
+    click.echo(f"  S1 API Token:          {'✅ SET' if config.s1_api_token else '❌ NOT SET'}")
     click.echo(f"  S1 Account ID:         {config.s1_account_id or 'Not set'}")
     click.echo(f"  S1 Site ID:            {config.s1_site_id or 'Not set'}")
     click.echo(f"  Min Confidence:        {config.min_confidence}%")

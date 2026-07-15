@@ -86,16 +86,12 @@ class ThreatFoxClient:
             )
 
             if response.status_code == 401:
-                try:
-                    error_body = response.json().get("error", response.text)
-                except Exception:
-                    error_body = response.text
                 logger.error(
                     "ThreatFox Auth-Key rejected (401 Unauthorized)",
-                    response_body=error_body,
+                    status_code=response.status_code,
                 )
                 raise RuntimeError(
-                    f"ThreatFox API rejected Auth-Key: {error_body}"
+                    "ThreatFox API authentication failed. Check Auth-Key in configuration."
                 )
 
             response.raise_for_status()

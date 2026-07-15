@@ -1,6 +1,8 @@
 """SQLite state management for tracking imported IOCs."""
 
+import os
 import sqlite3
+import stat
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -23,6 +25,10 @@ class StateDatabase:
         """Initialize database tables."""
         self.conn = sqlite3.connect(str(self.db_path))
         self.conn.row_factory = sqlite3.Row
+
+        # Enforce owner-only file permissions (0600) for security
+        if self.db_path.exists():
+            os.chmod(str(self.db_path), stat.S_IRUSR | stat.S_IWUSR)
 
         cursor = self.conn.cursor()
 
