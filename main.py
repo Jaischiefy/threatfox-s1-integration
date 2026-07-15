@@ -280,6 +280,16 @@ def import_iocs(ctx, confirm_write):
             # Record in state
             if not dry_run:
                 duration = time.time() - start_time
+                # Track each successfully created IOC
+                for ioc in to_import:
+                    db.add_ioc(
+                        external_id=ioc.external_id,
+                        ioc_type=ioc.type,
+                        value=ioc.value,
+                        source=ioc.source,
+                        confidence=ioc.confidence,
+                        valid_until=ioc.valid_until,
+                    )
                 db.record_import(
                     source="ThreatFox",
                     iocs_fetched=len(iocs_raw),
