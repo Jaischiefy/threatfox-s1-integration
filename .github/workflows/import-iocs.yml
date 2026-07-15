@@ -1,0 +1,61 @@
+name: ThreatFox to S1 IOC Import
+
+on:
+  schedule:
+    # Run every 4 hours (0, 4, 8, 12, 16, 20 UTC)
+    - cron: '0 */4 * * *'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  import-iocs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install httpx pydantic click python-dateutil structlog python-dotenv
+
+      - name: Create .env file
+        run: |
+          cat > .env << EOF
+          THREATFOX_AUTH_KEY=${{ secrets.THREATFOX_AUTH_KEY }}
+          S1_CONSOLE_URL=${{ secrets.S1_CONSOLE_URL }}
+          S1_API_TOKEN=${{ secrets.S1_API_TOKEN }}
+          S1_ACCOUNT_ID=${{ secrets.S1_ACCOUNT_ID }}
+          MIN_CONFIDENCE=90
+          IOC_MAX_AGE_HOURS=24
+          IP_EXPIRATION_DAYS=7
+          DOMAIN_EXPIRATION_DAYS=14
+          URL_EXPIRATION_DAYS=14
+          HASH_EXPIRATION_DAYS=30
+          MAX_IMPORTS_PER_RUN=250
+          BATCH_SIZE=25
+          LOG_LEVEL=INFO
+          DRY_RUN=false
+          STATE_DB=threatfox_s1.db
+          LOG_DIR=logs
+          EOF
+
+      - name: Import ThreatFox IOCs
+        run: python main.py import-iocs --confirm-write
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: import-logs
+          path: logs/
+          retention-days: 7
+
+      - name: Check status
+        run: python main.py status

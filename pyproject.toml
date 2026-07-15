@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=65.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "threatfox-s1-integration"
+version = "0.1.0"
+description = "ThreatFox to SentinelOne Threat Intelligence integration with IOC import and STAR rule support"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    {name = "Security Team", email = "security@fubo.tv"}
+]
+license = {text = "Proprietary"}
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: System Administrators",
+    "License :: Other/Proprietary License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Monitoring",
+    "Topic :: System :: Networking",
+    "Topic :: Security",
+]
+
+dependencies = [
+    "httpx>=0.24.0",           # Async HTTP client with timeouts, retries
+    "pydantic>=2.0.0",         # Data validation
+    "click>=8.1.0",            # CLI framework
+    "python-dateutil>=2.8.0",  # ISO8601 timestamp handling
+    "structlog>=23.0.0",       # Structured logging (JSON output)
+    "python-dotenv>=1.0.0",    # .env file support
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+    "types-requests",
+]
+
+[project.scripts]
+threatfox-s1 = "main:cli"
+
+[tool.setuptools]
+packages = [".", "tests"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+strict = true
