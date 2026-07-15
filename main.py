@@ -280,13 +280,22 @@ def import_iocs(ctx, confirm_write):
             # Record in state
             if not dry_run:
                 duration = time.time() - start_time
-                # Track each successfully created IOC
+                # Track each successfully created IOC with S1 UUID
+                # Build map of external_id -> S1 UUID from response
+                s1_uuid_map = {}
+                for created_ioc in result.get("created_iocs", []):
+                    ext_id = created_ioc.get("externalId")
+                    s1_uuid = created_ioc.get("uuid")
+                    if ext_id and s1_uuid:
+                        s1_uuid_map[ext_id] = s1_uuid
+
                 for ioc in to_import:
                     db.add_ioc(
                         external_id=ioc.external_id,
                         ioc_type=ioc.type,
                         value=ioc.value,
                         source=ioc.source,
+                        s1_uuid=s1_uuid_map.get(ioc.external_id),  # Use S1 UUID if available
                         confidence=ioc.confidence,
                         valid_until=ioc.valid_until,
                     )
@@ -381,19 +390,26 @@ def test_s1_auth(ctx):
 )
 @click.pass_context
 def test_ioc_import(ctx, limit, confirm_write):
-    """Test IOC import with sample indicators."""
+    """Test IOC import with sample indicators (DRY-RUN ONLY)."""
     config = ctx.obj["config"]
 
     if not config.validate():
         return
 
-    dry_run = not confirm_write
+    # SAFETY: Never write test IOCs to S1
+    if confirm_write:
+        click.secho(
+            "❌ ERROR: test-ioc-import cannot be used with --confirm-write",
+            fg="red",
+        )
+        click.echo(
+            "   This command uses test data and should only run in DRY-RUN mode."
+        )
+        click.echo("   Use 'import-iocs' to import real ThreatFox data.")
+        return
 
-    if dry_run:
-        click.secho("⚠️  DRY-RUN MODE", fg="yellow")
-        click.echo("   Use --confirm-write to actually create IOCs\n")
-
-    click.echo(f"🧪 Testing IOC import with {limit} sample indicators...\n")
+    click.secho("🧪 Test IOC Import (DRY-RUN ONLY)", fg="yellow")
+    click.echo(f"   Testing with {limit} sample indicators...\n")
 
     # Create sample IOCs (public IPs for testing)
     test_ips = ["8.8.8.8", "1.1.1.1", "208.67.222.222", "9.9.9.9", "208.67.222.123"]
@@ -446,23 +462,19 @@ def test_ioc_import(ctx, limit, confirm_write):
 
         result = asyncio.run(do_test_import())
 
-        if dry_run:
-            click.echo("   📤 Sample payload that would be sent:")
-            for ioc in valid_iocs[:2]:
-                import json
+        click.echo("   📤 Sample payload (DRY-RUN):")
+        for ioc in valid_iocs[:2]:
+            import json
 
-                payload = {
-                    "type": ioc.type,
-                    "value": ioc.value,
-                    "source": ioc.source,
-                    "externalId": ioc.external_id,
-                    "method": ioc.method,
-                    "validUntil": ioc.valid_until.isoformat() if ioc.valid_until else None,
-                }
-                click.echo(f"\n     {json.dumps(payload, indent=2)}")
-        else:
-            click.echo(f"   ✅ Created: {result['created']}")
-            click.echo(f"   ❌ Failed:  {result['failed']}")
+            payload = {
+                "type": ioc.type,
+                "value": ioc.value,
+                "source": ioc.source,
+                "externalId": ioc.external_id,
+                "method": ioc.method,
+                "validUntil": ioc.valid_until.isoformat() if ioc.valid_until else None,
+            }
+            click.echo(f"\n     {json.dumps(payload, indent=2)}")
 
     except Exception as e:
         click.secho(f"\n❌ Error: {str(e)}", fg="red")

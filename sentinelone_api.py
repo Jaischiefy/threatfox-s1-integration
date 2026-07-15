@@ -155,7 +155,7 @@ class SentinelOneClient:
         if not self.client:
             raise RuntimeError("Client not initialized")
 
-        summary = {"created": 0, "updated": 0, "failed": 0, "errors": []}
+        summary = {"created": 0, "updated": 0, "failed": 0, "errors": [], "created_iocs": []}
 
         # Process in batches
         for i in range(0, len(iocs), batch_size):
@@ -165,6 +165,7 @@ class SentinelOneClient:
             summary["updated"] += batch_results.get("updated", 0)
             summary["failed"] += batch_results.get("failed", 0)
             summary["errors"].extend(batch_results.get("errors", []))
+            summary["created_iocs"].extend(batch_results.get("created_iocs", []))
 
         return summary
 
@@ -199,12 +200,15 @@ class SentinelOneClient:
             )
 
             if response.status_code == 200:
+                result = response.json()
+                created_iocs = result.get("data", [])
                 logger.info("IOCs created successfully", count=len(iocs))
                 return {
                     "created": len(iocs),
                     "updated": 0,
                     "failed": 0,
                     "errors": [],
+                    "created_iocs": created_iocs,  # Include S1 response with UUIDs
                 }
             else:
                 error_detail = self._extract_error(response)
