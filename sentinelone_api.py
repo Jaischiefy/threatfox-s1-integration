@@ -173,8 +173,15 @@ class SentinelOneClient:
         self,
         iocs: list[NormalizedIOC],
         dry_run: bool = True,
+        retry_count: int = 0,
     ) -> dict[str, Any]:
-        """Create a batch of IOCs."""
+        """Create a batch of IOCs with robust error handling.
+
+        Handles S1 API quirks:
+        - HTTP 500 may still create IOCs; check before retrying
+        - HTTP 429 requires Retry-After header respect
+        - HTTP 400 is validation error; don't retry
+        """
         if not self.client:
             raise RuntimeError("Client not initialized")
 
@@ -184,11 +191,11 @@ class SentinelOneClient:
             logger.info(
                 "DRY RUN: Would create IOCs",
                 count=len(iocs),
-                payloads=payloads[:1],  # Log first one only
+                payloads=payloads[:1],
             )
             return {"created": 0, "updated": 0, "failed": 0, "errors": []}
 
-        logger.info("Creating IOCs", count=len(iocs), sample_payload=payloads[0] if payloads else None)
+        logger.info("Creating IOCs", count=len(iocs), retry_attempt=retry_count)
 
         try:
             response = await self.client.post(
@@ -199,6 +206,7 @@ class SentinelOneClient:
                 },
             )
 
+            # HTTP 200: Success
             if response.status_code == 200:
                 result = response.json()
                 created_iocs = result.get("data", [])
@@ -208,8 +216,88 @@ class SentinelOneClient:
                     "updated": 0,
                     "failed": 0,
                     "errors": [],
-                    "created_iocs": created_iocs,  # Include S1 response with UUIDs
+                    "created_iocs": created_iocs,
                 }
+
+            # HTTP 400: Validation error - don't retry
+            elif response.status_code == 400:
+                error_detail = self._extract_error(response)
+                logger.error(
+                    "IOC validation failed (400)",
+                    error=error_detail,
+                    count=len(iocs),
+                )
+                return {
+                    "created": 0,
+                    "updated": 0,
+                    "failed": len(iocs),
+                    "errors": [{"batch": error_detail}],
+                }
+
+            # HTTP 429: Rate limited - respect Retry-After
+            elif response.status_code == 429:
+                retry_after = int(response.headers.get("Retry-After", 5))
+                logger.warning(
+                    "Rate limited (429), will retry",
+                    retry_after_seconds=retry_after,
+                    count=len(iocs),
+                )
+                await asyncio.sleep(retry_after)
+                if retry_count < 2:
+                    return await self._create_batch(iocs, dry_run=False, retry_count=retry_count + 1)
+                else:
+                    return {
+                        "created": 0,
+                        "updated": 0,
+                        "failed": len(iocs),
+                        "errors": [{"batch": "Rate limited (429) - max retries exceeded"}],
+                    }
+
+            # HTTP 500/502/503/504: Server error - may have side effects
+            elif response.status_code in [500, 502, 503, 504]:
+                logger.warning(
+                    "Server error on IOC creation, checking if created",
+                    status_code=response.status_code,
+                    count=len(iocs),
+                )
+
+                # Check if IOCs were actually created despite the error
+                created_iocs = []
+                for ioc in iocs:
+                    existing = await self._get_ioc_by_external_id(ioc.external_id)
+                    if existing:
+                        created_iocs.append(existing)
+                        logger.info(
+                            "IOC exists despite server error",
+                            external_id=ioc.external_id,
+                            uuid=existing.get("uuid"),
+                        )
+
+                # If some/all were created, treat as success
+                if created_iocs:
+                    return {
+                        "created": len(created_iocs),
+                        "updated": 0,
+                        "failed": len(iocs) - len(created_iocs),
+                        "errors": [],
+                        "created_iocs": created_iocs,
+                    }
+
+                # None created - retry once after backoff
+                if retry_count < 1:
+                    await asyncio.sleep(5)
+                    logger.info("Retrying IOC creation after server error")
+                    return await self._create_batch(iocs, dry_run=False, retry_count=retry_count + 1)
+                else:
+                    error_detail = self._extract_error(response)
+                    return {
+                        "created": 0,
+                        "updated": 0,
+                        "failed": len(iocs),
+                        "errors": [{"batch": f"Server error ({response.status_code}) - {error_detail}"}],
+                    }
+
+            # Other status codes
             else:
                 error_detail = self._extract_error(response)
                 logger.error(
@@ -232,6 +320,26 @@ class SentinelOneClient:
                 "failed": len(iocs),
                 "errors": [{"batch": str(e)}],
             }
+
+    async def _get_ioc_by_external_id(self, external_id: str) -> Optional[dict[str, Any]]:
+        """Check if an IOC exists by external ID."""
+        if not self.client:
+            return None
+
+        try:
+            # Query with filter for external ID
+            response = await self.client.get(
+                f"{self.console_url}/web/api/v2.1/threat-intelligence/iocs",
+                params={"limit": 1, "externalId": external_id},
+            )
+
+            if response.status_code == 200:
+                data = response.json().get("data", [])
+                return data[0] if data else None
+        except Exception as e:
+            logger.warning("Error checking IOC existence", external_id=external_id, error=str(e))
+
+        return None
 
     async def get_iocs(self, ioc_type: Optional[str] = None, limit: int = 100) -> list[dict[str, Any]]:
         """Get list of imported IOCs."""
