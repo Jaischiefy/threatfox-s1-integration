@@ -3,7 +3,7 @@
 
 import asyncio
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -248,6 +248,29 @@ def import_iocs(ctx, confirm_write):
                 click.echo("   ✅ No new indicators to import")
                 return
 
+            # SAFEGUARD: Reject test external IDs
+            test_iocs = [ioc for ioc in to_import if ioc.external_id.startswith("threatfox-test-")]
+            if test_iocs:
+                click.secho(
+                    f"\n❌ SECURITY BLOCK: Found {len(test_iocs)} test IOCs",
+                    fg="red",
+                )
+                for ioc in test_iocs[:3]:
+                    click.echo(f"     • {ioc.external_id}")
+                if len(test_iocs) > 3:
+                    click.echo(f"     ... and {len(test_iocs) - 3} more")
+                click.echo("\n   Use: python main.py cleanup-test-iocs")
+                return
+
+            # SAFEGUARD: Require explicit confirmation for bulk imports
+            if len(to_import) > 25 and not confirm_write:
+                click.secho(
+                    f"\n⚠️  Large import: {len(to_import)} IOCs",
+                    fg="yellow",
+                )
+                click.echo("   Use --confirm-write to proceed with this bulk import")
+                return
+
             # Import to S1
             click.echo(f"   📤 Importing {len(to_import)} IOCs to SentinelOne...\n")
 
@@ -481,6 +504,94 @@ def test_ioc_import(ctx, limit, confirm_write):
         logger.error("Test import error", error=str(e))
 
     click.echo()
+
+
+@cli.command()
+@click.option(
+    "--confirm-delete",
+    is_flag=True,
+    help="Permanently delete test IOCs",
+)
+@click.pass_context
+def cleanup_test_iocs(ctx, confirm_delete):
+    """Remove test IOCs from SentinelOne (threatfox-test-* only)."""
+    config = ctx.obj["config"]
+
+    if not config.validate():
+        return
+
+    click.secho("🧹 Cleanup Test IOCs", fg="yellow")
+    click.echo("   Searching for test IOCs in SentinelOne...\n")
+
+    # Fetch all ThreatFox IOCs
+    async def do_cleanup():
+        async with SentinelOneClient(
+            config.s1_console_url,
+            config.s1_api_token,
+            account_id=config.s1_account_id,
+        ) as s1_client:
+            response = await s1_client.client.get(
+                f"{config.s1_console_url}/web/api/v2.1/threat-intelligence/iocs",
+                params={"source": "ThreatFox", "limit": 1000},
+            )
+
+            if response.status_code != 200:
+                click.secho("❌ Failed to fetch IOCs from S1", fg="red")
+                return
+
+            all_iocs = response.json().get("data", [])
+            test_iocs = [
+                ioc for ioc in all_iocs
+                if ioc.get("externalId", "").startswith("threatfox-test-")
+            ]
+
+            if not test_iocs:
+                click.secho("✅ No test IOCs found", fg="green")
+                return
+
+            # Report cleanup list
+            click.secho(f"\nFound {len(test_iocs)} test IOCs:\n", fg="yellow")
+            for ioc in test_iocs[:10]:
+                click.echo(f"  {ioc.get('value'):30} | {ioc.get('externalId'):25} | UUID: {ioc.get('uuid')[:16]}...")
+            if len(test_iocs) > 10:
+                click.echo(f"  ... and {len(test_iocs) - 10} more")
+
+            if not confirm_delete:
+                click.echo("\n   ℹ️  Use --confirm-delete to permanently remove these IOCs")
+                return
+
+            # Require explicit confirmation
+            confirmation = click.prompt(
+                "\n⚠️  This will permanently delete 259 test IOCs. Type the exact confirmation",
+                type=str,
+            )
+
+            if confirmation != "DELETE 259 TEST IOCS":
+                click.secho("❌ Confirmation mismatch. Deletion cancelled.", fg="red")
+                return
+
+            # Delete test IOCs (via PATCH to expire them)
+            deleted = 0
+            failed = 0
+            now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat() + "Z"
+
+            for ioc in test_iocs:
+                try:
+                    del_response = await s1_client.client.patch(
+                        f"{config.s1_console_url}/web/api/v2.1/threat-intelligence/iocs/{ioc.get('uuid')}",
+                        json={"validUntil": now_iso},
+                    )
+
+                    if del_response.status_code in [200, 204]:
+                        deleted += 1
+                    else:
+                        failed += 1
+                except Exception:
+                    failed += 1
+
+            click.secho(f"\n✅ Cleanup complete: {deleted} expired, {failed} failed\n", fg="green")
+
+    asyncio.run(do_cleanup())
 
 
 if __name__ == "__main__":

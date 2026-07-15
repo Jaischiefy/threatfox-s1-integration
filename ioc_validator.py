@@ -38,7 +38,7 @@ class NormalizedIOC:
 class IOCValidator:
     """Validates and normalizes indicators of compromise."""
 
-    # Private/reserved IP ranges to reject
+    # Private/reserved IP ranges and public DNS resolvers to reject
     PRIVATE_RANGES = [
         ipaddress.IPv4Network("0.0.0.0/8"),       # This network
         ipaddress.IPv4Network("10.0.0.0/8"),      # RFC1918 private
@@ -56,6 +56,18 @@ class IOCValidator:
         ipaddress.IPv4Network("240.0.0.0/4"),     # Reserved
         ipaddress.IPv4Network("255.255.255.255/32"),  # Broadcast
     ]
+
+    # Public DNS resolver IPs (known benign) - reject as test artifacts
+    PUBLIC_DNS_RESOLVERS = {
+        "8.8.8.8",          # Google DNS
+        "8.8.4.4",          # Google DNS
+        "1.1.1.1",          # Cloudflare DNS
+        "1.0.0.1",          # Cloudflare DNS
+        "9.9.9.9",          # Quad9 DNS
+        "149.112.112.112",  # Quad9 DNS
+        "208.67.222.222",   # OpenDNS
+        "208.67.220.220",   # OpenDNS
+    }
 
     @staticmethod
     def is_routable_ipv4(value: str) -> bool:
@@ -107,6 +119,9 @@ class IOCValidator:
             return None
         if not IOCValidator.is_routable_ipv4(value):
             logger.debug("Rejecting non-routable IPv4", value=value)
+            return None
+        if value in IOCValidator.PUBLIC_DNS_RESOLVERS:
+            logger.debug("Rejecting public DNS resolver", value=value)
             return None
         return value.strip().lower()
 
